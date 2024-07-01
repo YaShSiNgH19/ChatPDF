@@ -2,25 +2,18 @@ import streamlit as st
 from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import os
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_community.vectorstores import GoogleGenerativeAIEmbeddings
 import google.generativeai as genai
 from langchain.vectorstores import FAISS
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.vectorstores import ChatGoogleGenerativeAI
 from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
-import pickle
 
 # Load environment variables
 load_dotenv()
 api_key = os.getenv("GOOGLE_API_KEY")
 genai.configure(api_key=api_key)
-
-# Initialize session state for chat history and vector store
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
-if 'vector_store' not in st.session_state:
-    st.session_state.vector_store = None
 
 def get_pdf_text(pdf_docs):
     text = ""
@@ -39,7 +32,6 @@ def get_vector_store(text_chunks):
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
     vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
     vector_store.save_local("faiss_index")
-    st.session_state.vector_store = vector_store
 
 def get_conversational_chain():
     prompt_template = """
@@ -57,10 +49,6 @@ def get_conversational_chain():
     return chain
 
 def user_input(user_question):
-    if st.session_state.vector_store is None:
-        st.error("Please process a PDF file first.")
-        return
-
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
     new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
     docs = new_db.similarity_search(user_question)
@@ -71,57 +59,27 @@ def user_input(user_question):
         return_only_outputs=True
     )
 
-    st.session_state.chat_history.append({"question": user_question, "answer": response["output_text"]})
-
-def save_chat_history():
-    with open('chat_history.pkl', 'wb') as f:
-        pickle.dump(st.session_state.chat_history, f)
-    st.success("Chat history saved successfully!")
-
-def load_chat_history():
-    if os.path.exists('chat_history.pkl'):
-        with open('chat_history.pkl', 'rb') as f:
-            st.session_state.chat_history = pickle.load(f)
-        st.success("Chat history loaded successfully!")
+    print(response)
+    st.write("Reply: ", response["output_text"])
 
 def main():
-    st.set_page_config(page_title="Chat PDF", layout="wide")
-    st.markdown("<h1 style='text-align: center; color: #4CAF50;'>Chat with PDF using Gemini💁</h1>", unsafe_allow_html=True)
+    st.set_page_config(page_title="Chat PDF")
+    st.header("Chat with PDF using Gemini💁")
 
-    st.sidebar.title("Menu")
-    pdf_docs = st.sidebar.file_uploader("Upload your PDF Files and Click on the Submit & Process Button", accept_multiple_files=True)
-    if st.sidebar.button("Submit & Process"):
-        if pdf_docs:
+    user_question = st.text_input("Ask a Question from the PDF Files")
+
+    if user_question:
+        user_input(user_question)
+
+    with st.sidebar:
+        st.title("Menu:")
+        pdf_docs = st.file_uploader("Upload your PDF Files and Click on the Submit & Process Button", accept_multiple_files=True)
+        if st.button("Submit & Process"):
             with st.spinner("Processing..."):
                 raw_text = get_pdf_text(pdf_docs)
                 text_chunks = get_text_chunks(raw_text)
                 get_vector_store(text_chunks)
-                st.sidebar.success("Done")
-        else:
-            st.sidebar.error("Please upload at least one PDF file.")
-
-    if st.sidebar.button("Load Previous Chat History"):
-        load_chat_history()
-
-    if st.sidebar.button("Clear Chat History"):
-        st.session_state.chat_history = []
-
-    if st.sidebar.button("Save Chat History"):
-        save_chat_history()
-
-    st.sidebar.markdown("---")
-
-    user_question = st.text_input("Ask a Question from the PDF Files", key="user_question_input")
-    
-    if user_question:
-        user_input(user_question)
-
-    if st.session_state.chat_history:
-        st.markdown("<h2 style='color: #4CAF50;'>Chat History</h2>", unsafe_allow_html=True)
-        for i, entry in enumerate(st.session_state.chat_history):
-            st.markdown(f"**Q{i+1}:** {entry['question']}")
-            st.markdown(f"**A{i+1}:** {entry['answer']}")
-            st.markdown("---")
+                st.success("Done")
 
 if __name__ == "__main__":
     main()
